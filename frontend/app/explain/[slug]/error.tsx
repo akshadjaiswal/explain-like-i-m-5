@@ -26,17 +26,17 @@ export default function Error({
       <Header showSearch />
 
       <main className="flex-1">
-        <div className="container px-4 py-8 md:py-12">
+        <div className="container mx-auto max-w-7xl px-4 py-8 md:py-12">
           <div className="flex min-h-[400px] flex-col items-center justify-center gap-6 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
               <AlertCircle className="h-8 w-8 text-destructive" />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 max-w-md mx-auto">
               <h1 className="text-3xl font-bold tracking-tight">
                 Oops! Something went wrong
               </h1>
-              <p className="text-muted-foreground max-w-md">
+              <p className="text-muted-foreground">
                 We encountered an error while generating your explanation. Please
                 try again.
               </p>

@@ -37,9 +37,9 @@ export default async function ExplainPage({ params }: ExplainPageProps) {
       <Header showSearch />
 
       <main className="flex-1">
-        <div className="container px-4 py-8 md:py-12">
+        <div className="container mx-auto max-w-7xl px-4 py-8 md:py-12">
           {/* Topic Header */}
-          <div className="mb-8 space-y-2">
+          <div className="mb-8 space-y-2 text-center md:text-left">
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl font-mono">
               {topicTitle}
             </h1>

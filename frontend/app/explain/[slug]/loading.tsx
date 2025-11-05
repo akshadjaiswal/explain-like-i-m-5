@@ -13,11 +13,11 @@ export default function Loading() {
       <Header showSearch />
 
       <main className="flex-1">
-        <div className="container px-4 py-8 md:py-12">
+        <div className="container mx-auto max-w-7xl px-4 py-8 md:py-12">
           {/* Topic Header Skeleton */}
-          <div className="mb-8 space-y-2">
-            <Skeleton className="h-10 w-64" />
-            <Skeleton className="h-4 w-96" />
+          <div className="mb-8 space-y-2 text-center md:text-left">
+            <Skeleton className="h-10 w-64 mx-auto md:mx-0" />
+            <Skeleton className="h-4 w-96 mx-auto md:mx-0 max-w-full" />
           </div>
 
           {/* Explanation Viewer Skeleton */}

@@ -27,19 +27,29 @@ export function SearchBar({
 }: SearchBarProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Debounce the search query to avoid firing on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, 300); // 300ms delay
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const { data: suggestions, isLoading } = useQuery({
-    queryKey: ["search", query],
+    queryKey: ["search", debouncedQuery],
     queryFn: async () => {
-      if (!query || query.trim().length < 2) return [];
-      const res = await fetch(`/api/topics/search?q=${encodeURIComponent(query)}`);
+      if (!debouncedQuery || debouncedQuery.trim().length < 2) return [];
+      const res = await fetch(`/api/topics/search?q=${encodeURIComponent(debouncedQuery)}`);
       const data = await res.json();
       return data.topics || [];
     },
-    enabled: query.trim().length >= 2,
+    enabled: debouncedQuery.trim().length >= 2,
   });
 
   const handleSearch = (searchTerm: string) => {
@@ -62,12 +72,12 @@ export function SearchBar({
   };
 
   useEffect(() => {
-    if (query.trim().length >= 2 && suggestions && suggestions.length > 0) {
+    if (debouncedQuery.trim().length >= 2 && suggestions && suggestions.length > 0) {
       setShowSuggestions(true);
     } else {
       setShowSuggestions(false);
     }
-  }, [query, suggestions]);
+  }, [debouncedQuery, suggestions]);
 
   return (
     <div className={cn("relative w-full", className)}>
@@ -123,7 +133,7 @@ export function SearchBar({
       )}
 
       {/* Loading indicator */}
-      {isLoading && query.trim().length >= 2 && (
+      {isLoading && debouncedQuery.trim().length >= 2 && (
         <Card className="absolute z-50 w-full mt-2 p-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
