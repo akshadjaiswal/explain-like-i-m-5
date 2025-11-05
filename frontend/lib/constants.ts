@@ -37,8 +37,7 @@ export const LEVEL_DESCRIPTIONS = {
 export const GEMINI_CONFIG = {
   MODELS: [
     "gemini-2.0-flash-exp",      // Fastest, experimental (try first)
-    "gemini-1.5-pro",            // Stable, production-ready (fallback)
-    "gemini-1.5-flash",          // Alternative fallback
+    "gemini-2.5-flash",          // Higher quota, production-ready fallback
   ],
   TEMPERATURES: {
     [COMPLEXITY_LEVELS.BEGINNER]: 0.8,

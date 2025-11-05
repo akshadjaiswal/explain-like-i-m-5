@@ -15,6 +15,7 @@ interface LevelTabsProps {
   streamingStates?: Record<ComplexityLevel, boolean>;
   cachedStates?: Record<ComplexityLevel, boolean>;
   defaultLevel?: ComplexityLevel;
+  isLoading?: boolean;
   className?: string;
 }
 
@@ -33,18 +34,28 @@ export function LevelTabs({
   streamingStates = {} as Record<ComplexityLevel, boolean>,
   cachedStates = {} as Record<ComplexityLevel, boolean>,
   defaultLevel = COMPLEXITY_LEVELS.BEGINNER,
+  isLoading = false,
   className,
 }: LevelTabsProps) {
   const levels = Object.values(COMPLEXITY_LEVELS) as ComplexityLevel[];
 
   return (
     <Tabs defaultValue={defaultLevel} className={cn("w-full", className)}>
-      <TabsList className="grid w-full grid-cols-4 font-mono">
+      <TabsList className="grid w-full h-auto grid-cols-2 gap-2 p-2 font-mono sm:grid-cols-4 sm:p-2 md:gap-1.5 md:p-1">
         {levels.map((level) => (
           <TabsTrigger
             key={level}
             value={level}
-            className={cn("text-xs sm:text-sm", tabStyles[level])}
+            className={cn(
+              "w-full justify-center",
+              "text-xs sm:text-sm md:text-base leading-tight",
+              "min-h-[48px] sm:min-h-[42px]",
+              "px-2 py-2 sm:px-3 md:px-4",
+              "font-medium",
+              "transition-all duration-200",
+              "active:scale-95",
+              tabStyles[level]
+            )}
           >
             {LEVEL_LABELS[level]}
           </TabsTrigger>
@@ -52,12 +63,13 @@ export function LevelTabs({
       </TabsList>
 
       {levels.map((level) => (
-        <TabsContent key={level} value={level} className="mt-6">
+        <TabsContent key={level} value={level} className="mt-4 md:mt-6">
           <LevelCard
             level={level}
             content={explanations[level] || ""}
             isStreaming={streamingStates[level] || false}
             cached={cachedStates[level] || false}
+            isLoading={isLoading}
           />
         </TabsContent>
       ))}

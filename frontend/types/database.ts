@@ -44,6 +44,7 @@ export interface Database {
           is_trending?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       explanations: {
         Row: {
@@ -79,6 +80,14 @@ export interface Database {
           last_accessed?: string;
           access_count?: number;
         };
+        Relationships: [
+          {
+            foreignKeyName: "explanations_topic_slug_fkey";
+            columns: ["topic_slug"];
+            referencedRelation: "topics";
+            referencedColumns: ["slug"];
+          }
+        ];
       };
     };
     Views: {
