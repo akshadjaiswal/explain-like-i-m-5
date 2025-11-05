@@ -12,7 +12,7 @@ import {
 } from "@/lib/cache/service";
 import { createSlug, slugToTitle } from "@/lib/utils/slugify";
 import { COMPLEXITY_LEVELS } from "@/lib/constants";
-import { ComplexityLevel } from "@/types";
+import { ComplexityLevel, Explanation } from "@/types";
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,8 +39,13 @@ export async function POST(request: NextRequest) {
 
     // Check cache first
     const cached = await getCachedExplanations(topicSlug);
+    const cachedByLevel = new Map<ComplexityLevel, Explanation>();
+    cached?.forEach((item) => cachedByLevel.set(item.complexityLevel, item));
+    const allLevelsCached = requestedLevels.every((level) =>
+      cachedByLevel.has(level)
+    );
 
-    if (cached && cached.length === requestedLevels.length) {
+    if (cached && allLevelsCached) {
       // All explanations are cached - return immediately
       await getOrCreateTopic(topicSlug, topicTitle);
 
@@ -62,9 +67,7 @@ export async function POST(request: NextRequest) {
         try {
           for (const level of requestedLevels) {
             // Check if this level is cached
-            const cachedLevel = cached?.find(
-              (e) => e.complexityLevel === level
-            );
+            const cachedLevel = cachedByLevel.get(level);
 
             if (cachedLevel) {
               // Send cached explanation

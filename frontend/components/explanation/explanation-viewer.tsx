@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { LevelTabs } from "./level-tabs";
 import { ExplanationLoadingSkeleton } from "./loading-skeleton";
 import { ComplexityLevel, Explanation } from "@/types";
@@ -48,12 +48,49 @@ export function ExplanationViewer({
   const [isLoading, setIsLoading] = useState(!cached || cached.length === 0);
   const [error, setError] = useState<string | null>(null);
 
+  // Track if we've already fetched to prevent duplicate calls
+  const hasFetchedRef = useRef(false);
+  const currentSlugRef = useRef(slug);
+
   useEffect(() => {
+    // Reset state when slug changes for smooth navigation
+    if (currentSlugRef.current !== slug) {
+      hasFetchedRef.current = false;
+      currentSlugRef.current = slug;
+
+      // Clear previous content immediately for better UX
+      setExplanations({} as Record<ComplexityLevel, string>);
+      setStreamingStates({} as Record<ComplexityLevel, boolean>);
+      setCachedStates({} as Record<ComplexityLevel, boolean>);
+      setIsLoading(true);
+      setError(null);
+
+      // If we have cached data, populate immediately
+      if (cached && cached.length > 0) {
+        const initial = {} as Record<ComplexityLevel, string>;
+        const cachedState = {} as Record<ComplexityLevel, boolean>;
+        cached.forEach((exp) => {
+          initial[exp.complexityLevel] = exp.content;
+          cachedState[exp.complexityLevel] = true;
+        });
+        setExplanations(initial);
+        setCachedStates(cachedState);
+      }
+    }
+
     // If all explanations are cached, no need to fetch
     if (cached && cached.length === 4) {
       setIsLoading(false);
+      hasFetchedRef.current = true;
       return;
     }
+
+    // Prevent duplicate fetches
+    if (hasFetchedRef.current) {
+      return;
+    }
+
+    hasFetchedRef.current = true;
 
     // Generate explanations with streaming
     const generateExplanations = async () => {
@@ -160,7 +197,7 @@ export function ExplanationViewer({
     };
 
     generateExplanations();
-  }, [slug, topicTitle, cached]);
+  }, [slug]); // Only re-run when slug changes, not on every render
 
   if (error) {
     return (
@@ -177,7 +214,10 @@ export function ExplanationViewer({
     );
   }
 
-  if (isLoading && Object.keys(explanations).length === 0) {
+  // Show skeleton if loading AND no content yet
+  const hasAnyContent = Object.values(explanations).some(content => content && content.length > 0);
+
+  if (isLoading && !hasAnyContent) {
     return <ExplanationLoadingSkeleton />;
   }
 
@@ -186,6 +226,7 @@ export function ExplanationViewer({
       explanations={explanations}
       streamingStates={streamingStates}
       cachedStates={cachedStates}
+      isLoading={isLoading}
     />
   );
 }

@@ -7,6 +7,103 @@ import { ComplexityLevel } from "@/types";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 
+const temporarilyDisabledModels = new Map<string, number>();
+const RATE_LIMIT_BUFFER_MS = 500;
+const DEFAULT_RETRY_AFTER_MS = 5000;
+
+class GeminiAPIError extends Error {
+  readonly status: number;
+  readonly modelId: string;
+  readonly retryAfterMs?: number;
+  readonly rawBody: string;
+
+  constructor(modelId: string, status: number, message: string, rawBody: string, retryAfterMs?: number) {
+    super(`Model ${modelId} failed: ${status} - ${message}`);
+    this.name = "GeminiAPIError";
+    this.status = status;
+    this.modelId = modelId;
+    this.retryAfterMs = retryAfterMs;
+    this.rawBody = rawBody;
+  }
+
+  get isRateLimited(): boolean {
+    return this.status === 429;
+  }
+}
+
+function isGeminiAPIError(error: unknown): error is GeminiAPIError {
+  return error instanceof GeminiAPIError;
+}
+
+function parseRetryDelay(delay?: string | null): number | undefined {
+  if (!delay) return undefined;
+
+  // Retry delay can be formatted as "4s" or "4.6s" etc.
+  const match = delay.match(/([\d.]+)s/);
+  if (!match) return undefined;
+
+  const seconds = parseFloat(match[1]);
+  return Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : undefined;
+}
+
+function extractErrorDetails(rawBody: string): { message: string; retryAfterMs?: number } {
+  try {
+    const parsed = JSON.parse(rawBody);
+    const message =
+      parsed?.error?.message ||
+      parsed?.message ||
+      rawBody;
+
+    const retryInfo = parsed?.error?.details?.find(
+      (detail: Record<string, unknown>) =>
+        detail?.["@type"] === "type.googleapis.com/google.rpc.RetryInfo"
+    );
+
+    const retryDelay = parseRetryDelay(retryInfo?.retryDelay as string | undefined);
+
+    return {
+      message,
+      retryAfterMs: retryDelay,
+    };
+  } catch {
+    return {
+      message: rawBody,
+    };
+  }
+}
+
+function isModelAvailable(modelId: string): boolean {
+  const disabledUntil = temporarilyDisabledModels.get(modelId);
+  if (disabledUntil === undefined) {
+    return true;
+  }
+
+  if (disabledUntil <= Date.now()) {
+    temporarilyDisabledModels.delete(modelId);
+    return true;
+  }
+
+  return false;
+}
+
+function getModelsToTry(): { models: string[]; usingFallback: boolean } {
+  const availableModels = GEMINI_CONFIG.MODELS.filter(isModelAvailable);
+  if (availableModels.length > 0) {
+    return { models: availableModels, usingFallback: false };
+  }
+
+  // All models temporarily disabled – fall back to trying everything
+  return { models: [...GEMINI_CONFIG.MODELS], usingFallback: true };
+}
+
+function temporarilyDisableModel(modelId: string, retryAfterMs?: number) {
+  const backoffMs = (retryAfterMs ?? DEFAULT_RETRY_AFTER_MS) + RATE_LIMIT_BUFFER_MS;
+  temporarilyDisabledModels.set(modelId, Date.now() + backoffMs);
+  console.warn(
+    `⏳ Temporarily disabling model ${modelId} for ${backoffMs}ms due to rate limit`
+  );
+}
+
 export interface GenerateOptions {
   topic: string;
   level: ComplexityLevel;
@@ -47,7 +144,8 @@ async function callGeminiStreamingAPI(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Model ${modelId} failed: ${response.status} - ${errorText}`);
+    const { message, retryAfterMs } = extractErrorDetails(errorText);
+    throw new GeminiAPIError(modelId, response.status, message, errorText, retryAfterMs);
   }
 
   if (!response.body) {
@@ -70,8 +168,15 @@ export async function* generateExplanationStream(
 
   let lastError: Error | null = null;
 
+  const { models, usingFallback } = getModelsToTry();
+
   // Try each model in order
-  for (const modelId of GEMINI_CONFIG.MODELS) {
+  for (const modelId of models) {
+    if (!usingFallback && !isModelAvailable(modelId)) {
+      console.warn(`⏭️ Skipping Gemini model ${modelId} (temporarily rate-limited)`);
+      continue;
+    }
+
     try {
       console.log(`🔄 Trying Gemini model: ${modelId}`);
 
@@ -94,7 +199,7 @@ export async function* generateExplanationStream(
               if (text) {
                 yield text;
               }
-            } catch (e) {
+            } catch {
               // Ignore parse errors for incomplete chunks
             }
           }
@@ -106,6 +211,9 @@ export async function* generateExplanationStream(
     } catch (error) {
       lastError = error as Error;
       console.error(`❌ Model ${modelId} failed:`, error);
+      if (isGeminiAPIError(error) && error.isRateLimited) {
+        temporarilyDisableModel(modelId, error.retryAfterMs);
+      }
       // Continue to next model
       continue;
     }
@@ -128,8 +236,15 @@ export async function generateExplanation(
 
   let lastError: Error | null = null;
 
+  const { models, usingFallback } = getModelsToTry();
+
   // Try each model in order
-  for (const modelId of GEMINI_CONFIG.MODELS) {
+  for (const modelId of models) {
+    if (!usingFallback && !isModelAvailable(modelId)) {
+      console.warn(`⏭️ Skipping Gemini model ${modelId} (temporarily rate-limited)`);
+      continue;
+    }
+
     try {
       console.log(`🔄 Trying Gemini model: ${modelId}`);
 
@@ -157,7 +272,8 @@ export async function generateExplanation(
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Model ${modelId} failed: ${response.status} - ${errorText}`);
+        const { message, retryAfterMs } = extractErrorDetails(errorText);
+        throw new GeminiAPIError(modelId, response.status, message, errorText, retryAfterMs);
       }
 
       const result = await response.json();
@@ -172,6 +288,9 @@ export async function generateExplanation(
     } catch (error) {
       lastError = error as Error;
       console.error(`❌ Model ${modelId} failed:`, error);
+      if (isGeminiAPIError(error) && error.isRateLimited) {
+        temporarilyDisableModel(modelId, error.retryAfterMs);
+      }
       // Continue to next model
       continue;
     }

@@ -55,10 +55,17 @@ export function SearchBar({
   const handleSearch = (searchTerm: string) => {
     if (!searchTerm.trim()) return;
 
+    // Immediate visual feedback
     setIsSearching(true);
     setShowSuggestions(false);
+    setQuery(searchTerm); // Keep the search term visible
+
     const slug = createSlug(searchTerm);
-    router.push(`/explain/${slug}`);
+
+    // Add slight delay for visual feedback before navigation
+    setTimeout(() => {
+      router.push(`/explain/${slug}`);
+    }, 100);
   };
 
   const handleSubmit = (e: React.FormEvent) => {

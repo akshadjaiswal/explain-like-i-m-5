@@ -16,16 +16,16 @@ export default async function Home() {
       <main className="flex-1">
         {/* Hero Section */}
         <section className="border-b bg-gradient-to-b from-background to-muted/20">
-          <div className="container mx-auto max-w-6xl px-4 py-16 md:py-24">
-            <div className="flex flex-col items-center justify-center gap-8 text-center">
-              <div className="space-y-4 max-w-3xl mx-auto">
-                <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl font-mono">
+          <div className="container mx-auto max-w-6xl px-4 sm:px-6 py-12 sm:py-16 md:py-24">
+            <div className="flex flex-col items-center justify-center gap-6 sm:gap-8 text-center">
+              <div className="space-y-3 sm:space-y-4 max-w-3xl mx-auto px-2">
+                <h1 className="text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl lg:text-6xl font-mono leading-tight">
                   Understand{" "}
                   <span className="text-primary">Any Topic</span>
                   <br />
                   at Your Level
                 </h1>
-                <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto">
                   {APP_CONFIG.DESCRIPTION}. From beginner to expert - we explain
                   it all.
                 </p>
@@ -33,28 +33,28 @@ export default async function Home() {
 
               <div className="w-full max-w-2xl mx-auto">
                 <SearchBar
-                  placeholder="What do you want to understand? (e.g., Quantum Computing)"
+                  placeholder="What do you want to understand?"
                   autoFocus
                 />
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm text-muted-foreground px-4">
                 <span className="font-mono">Try:</span>
                 <a
                   href="/explain/blockchain"
-                  className="rounded-full bg-secondary px-3 py-1 hover:bg-secondary/80 transition-colors"
+                  className="rounded-full bg-secondary px-3 py-1.5 sm:py-2 hover:bg-secondary/80 transition-colors min-h-[36px] flex items-center"
                 >
                   Blockchain
                 </a>
                 <a
                   href="/explain/machine-learning"
-                  className="rounded-full bg-secondary px-3 py-1 hover:bg-secondary/80 transition-colors"
+                  className="rounded-full bg-secondary px-3 py-1.5 sm:py-2 hover:bg-secondary/80 transition-colors min-h-[36px] flex items-center"
                 >
                   Machine Learning
                 </a>
                 <a
                   href="/explain/quantum-physics"
-                  className="rounded-full bg-secondary px-3 py-1 hover:bg-secondary/80 transition-colors"
+                  className="rounded-full bg-secondary px-3 py-1.5 sm:py-2 hover:bg-secondary/80 transition-colors min-h-[36px] flex items-center"
                 >
                   Quantum Physics
                 </a>
@@ -64,7 +64,7 @@ export default async function Home() {
         </section>
 
         {/* Trending Topics Section */}
-        <section className="container mx-auto max-w-7xl px-4 py-12 md:py-16">
+        <section className="container mx-auto max-w-7xl px-4 sm:px-6 py-10 sm:py-12 md:py-16">
           <TrendingTopics topics={trendingTopics} />
         </section>
 

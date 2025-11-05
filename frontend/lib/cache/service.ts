@@ -4,7 +4,15 @@
 
 import { createServiceClient } from "@/lib/supabase/server";
 import { ComplexityLevel, Explanation } from "@/types";
+import { Database } from "@/types/database";
 import { CACHE_CONFIG } from "@/lib/constants";
+
+type ExplanationRow = Database["public"]["Tables"]["explanations"]["Row"];
+type ExplanationUpdate = Database["public"]["Tables"]["explanations"]["Update"];
+type ExplanationInsert = Database["public"]["Tables"]["explanations"]["Insert"];
+type TopicRow = Database["public"]["Tables"]["topics"]["Row"];
+type TopicUpdate = Database["public"]["Tables"]["topics"]["Update"];
+type TopicInsert = Database["public"]["Tables"]["topics"]["Insert"];
 
 /**
  * Check if cached explanations exist for a topic
@@ -27,17 +35,22 @@ export async function getCachedExplanations(
     return null;
   }
 
+  // Type assertion after validation
+  const explanations = data as ExplanationRow[];
+
   // Update last_accessed and access_count
-  const ids = data.map((e) => e.id);
+  const ids = explanations.map((e) => e.id);
+  const updateData: ExplanationUpdate = {
+    last_accessed: new Date().toISOString(),
+    access_count: explanations[0].access_count + 1,
+  };
+
   await supabase
     .from("explanations")
-    .update({
-      last_accessed: new Date().toISOString(),
-      access_count: data[0].access_count + 1,
-    })
+    .update<ExplanationUpdate>(updateData)
     .in("id", ids);
 
-  return data.map(mapDbToExplanation);
+  return explanations.map(mapDbToExplanation);
 }
 
 /**
@@ -53,23 +66,25 @@ export async function saveExplanation(
 
   const wordCount = content.split(/\s+/).length;
 
+  const insertData: ExplanationInsert = {
+    topic_slug: topicSlug,
+    topic_title: topicTitle,
+    complexity_level: level,
+    content,
+    word_count: wordCount,
+  };
+
   const { data, error } = await supabase
     .from("explanations")
-    .insert({
-      topic_slug: topicSlug,
-      topic_title: topicTitle,
-      complexity_level: level,
-      content,
-      word_count: wordCount,
-    })
+    .insert<ExplanationInsert>(insertData)
     .select()
     .single();
 
-  if (error) {
-    throw new Error(`Failed to save explanation: ${error.message}`);
+  if (error || !data) {
+    throw new Error(`Failed to save explanation: ${error?.message || "No data returned"}`);
   }
 
-  return mapDbToExplanation(data);
+  return mapDbToExplanation(data as ExplanationRow);
 }
 
 /**
@@ -89,23 +104,30 @@ export async function getOrCreateTopic(
     .single();
 
   if (existing) {
+    // Type assertion after validation
+    const topic = existing as TopicRow;
+
+    const updateData: TopicUpdate = {
+      view_count: topic.view_count + 1,
+      last_generated: new Date().toISOString(),
+    };
+
     // Update view count and last_generated
     await supabase
       .from("topics")
-      .update({
-        view_count: existing.view_count + 1,
-        last_generated: new Date().toISOString(),
-      })
-      .eq("id", existing.id);
+      .update<TopicUpdate>(updateData)
+      .eq("id", topic.id);
   } else {
     // Create new topic
-    await supabase.from("topics").insert({
+    const insertData: TopicInsert = {
       slug,
       title,
       view_count: 1,
       last_generated: new Date().toISOString(),
       is_trending: false,
-    });
+    };
+
+    await supabase.from("topics").insert<TopicInsert>(insertData);
   }
 }
 
@@ -121,11 +143,11 @@ export async function getTrendingTopics(limit: number = 12) {
     .order("view_count", { ascending: false })
     .limit(limit);
 
-  if (error) {
-    throw new Error(`Failed to get trending topics: ${error.message}`);
+  if (error || !data) {
+    throw new Error(`Failed to get trending topics: ${error?.message || "No data returned"}`);
   }
 
-  return data.map(mapDbToTopic);
+  return (data as TopicRow[]).map(mapDbToTopic);
 }
 
 /**
@@ -141,15 +163,15 @@ export async function searchTopics(query: string, limit: number = 5) {
     .order("view_count", { ascending: false })
     .limit(limit);
 
-  if (error) {
-    throw new Error(`Failed to search topics: ${error.message}`);
+  if (error || !data) {
+    throw new Error(`Failed to search topics: ${error?.message || "No data returned"}`);
   }
 
-  return data.map(mapDbToTopic);
+  return (data as TopicRow[]).map(mapDbToTopic);
 }
 
 // Helper functions to map database types to application types
-function mapDbToExplanation(data: any): Explanation {
+function mapDbToExplanation(data: ExplanationRow): Explanation {
   return {
     id: data.id,
     topicSlug: data.topic_slug,
@@ -163,7 +185,7 @@ function mapDbToExplanation(data: any): Explanation {
   };
 }
 
-function mapDbToTopic(data: any) {
+function mapDbToTopic(data: TopicRow) {
   return {
     id: data.id,
     slug: data.slug,
