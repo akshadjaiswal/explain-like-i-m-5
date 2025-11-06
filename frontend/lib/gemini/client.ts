@@ -2,7 +2,9 @@
  * Gemini AI client for generating explanations
  */
 
+import { createExplanationPrompt } from "@/lib/ai/prompts";
 import { GEMINI_CONFIG } from "@/lib/constants";
+import { generateGroqExplanation } from "@/lib/groq/client";
 import { ComplexityLevel } from "@/types";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
@@ -162,18 +164,58 @@ export async function* generateExplanationStream(
   options: GenerateOptions
 ): AsyncGenerator<string, void, unknown> {
   const { topic, level, temperature, maxTokens } = options;
-  const prompt = createPrompt(topic, level);
+  const prompt = createExplanationPrompt(topic, level);
   const temp = temperature ?? GEMINI_CONFIG.TEMPERATURES[level];
   const tokens = maxTokens ?? GEMINI_CONFIG.MAX_TOKENS;
 
   let lastError: Error | null = null;
+  let groqAttempted = false;
+
+  const tryGroqFallback = async () => {
+    console.log("🔄 Trying Groq fallback model");
+    const groqText = await generateGroqExplanation({
+      topic,
+      level,
+      temperature: temp,
+      maxTokens: tokens,
+    });
+    console.log("✅ Successfully used Groq fallback model");
+    return groqText;
+  };
 
   const { models, usingFallback } = getModelsToTry();
+  const primaryModelId = GEMINI_CONFIG.MODELS[0];
+  const primaryInQueue = models.includes(primaryModelId);
+
+  if (!primaryInQueue && !groqAttempted) {
+    groqAttempted = true;
+    try {
+      const groqText = await tryGroqFallback();
+      yield groqText;
+      return;
+    } catch (groqError) {
+      lastError = groqError as Error;
+      console.error("❌ Groq fallback failed:", groqError);
+    }
+  }
 
   // Try each model in order
   for (const modelId of models) {
+    const isPrimaryModel = modelId === primaryModelId;
+
     if (!usingFallback && !isModelAvailable(modelId)) {
       console.warn(`⏭️ Skipping Gemini model ${modelId} (temporarily rate-limited)`);
+      if (isPrimaryModel && !groqAttempted) {
+        groqAttempted = true;
+        try {
+          const groqText = await tryGroqFallback();
+          yield groqText;
+          return;
+        } catch (groqError) {
+          lastError = groqError as Error;
+          console.error("❌ Groq fallback failed:", groqError);
+        }
+      }
       continue;
     }
 
@@ -214,8 +256,32 @@ export async function* generateExplanationStream(
       if (isGeminiAPIError(error) && error.isRateLimited) {
         temporarilyDisableModel(modelId, error.retryAfterMs);
       }
+
+      if (!groqAttempted && (isPrimaryModel || modelId === models[0])) {
+        groqAttempted = true;
+        try {
+          const groqText = await tryGroqFallback();
+          yield groqText;
+          return;
+        } catch (groqError) {
+          lastError = groqError as Error;
+          console.error("❌ Groq fallback failed:", groqError);
+        }
+      }
       // Continue to next model
       continue;
+    }
+  }
+
+  if (!groqAttempted) {
+    groqAttempted = true;
+    try {
+      const groqText = await tryGroqFallback();
+      yield groqText;
+      return;
+    } catch (groqError) {
+      lastError = groqError as Error;
+      console.error("❌ Groq fallback failed:", groqError);
     }
   }
 
@@ -230,18 +296,54 @@ export async function generateExplanation(
   options: GenerateOptions
 ): Promise<string> {
   const { topic, level, temperature, maxTokens } = options;
-  const prompt = createPrompt(topic, level);
+  const prompt = createExplanationPrompt(topic, level);
   const temp = temperature ?? GEMINI_CONFIG.TEMPERATURES[level];
   const tokens = maxTokens ?? GEMINI_CONFIG.MAX_TOKENS;
 
   let lastError: Error | null = null;
+  let groqAttempted = false;
+
+  const tryGroqFallback = async () => {
+    console.log("🔄 Trying Groq fallback model");
+    const groqText = await generateGroqExplanation({
+      topic,
+      level,
+      temperature: temp,
+      maxTokens: tokens,
+    });
+    console.log("✅ Successfully used Groq fallback model");
+    return groqText;
+  };
 
   const { models, usingFallback } = getModelsToTry();
+  const primaryModelId = GEMINI_CONFIG.MODELS[0];
+  const primaryInQueue = models.includes(primaryModelId);
+
+  if (!primaryInQueue && !groqAttempted) {
+    groqAttempted = true;
+    try {
+      return await tryGroqFallback();
+    } catch (groqError) {
+      lastError = groqError as Error;
+      console.error("❌ Groq fallback failed:", groqError);
+    }
+  }
 
   // Try each model in order
   for (const modelId of models) {
+    const isPrimaryModel = modelId === primaryModelId;
+
     if (!usingFallback && !isModelAvailable(modelId)) {
       console.warn(`⏭️ Skipping Gemini model ${modelId} (temporarily rate-limited)`);
+      if (isPrimaryModel && !groqAttempted) {
+        groqAttempted = true;
+        try {
+          return await tryGroqFallback();
+        } catch (groqError) {
+          lastError = groqError as Error;
+          console.error("❌ Groq fallback failed:", groqError);
+        }
+      }
       continue;
     }
 
@@ -291,28 +393,31 @@ export async function generateExplanation(
       if (isGeminiAPIError(error) && error.isRateLimited) {
         temporarilyDisableModel(modelId, error.retryAfterMs);
       }
+
+      if (!groqAttempted && (isPrimaryModel || modelId === models[0])) {
+        groqAttempted = true;
+        try {
+          return await tryGroqFallback();
+        } catch (groqError) {
+          lastError = groqError as Error;
+          console.error("❌ Groq fallback failed:", groqError);
+        }
+      }
       // Continue to next model
       continue;
     }
   }
 
+  if (!groqAttempted) {
+    groqAttempted = true;
+    try {
+      return await tryGroqFallback();
+    } catch (groqError) {
+      lastError = groqError as Error;
+      console.error("❌ Groq fallback failed:", groqError);
+    }
+  }
+
   // All models failed
   throw lastError || new Error("All Gemini models failed");
-}
-
-/**
- * Create a level-specific prompt for a topic
- */
-function createPrompt(topic: string, level: ComplexityLevel): string {
-  const prompts: Record<ComplexityLevel, string> = {
-    beginner: `Explain "${topic}" as if talking to a 5-year-old. Use simple words, fun analogies, and short sentences. Make it exciting and easy to understand. Keep it under 200 words.`,
-
-    intermediate: `Explain "${topic}" at a high school level. Introduce proper terminology but keep it accessible. Use 2-3 paragraphs. Keep it under 300 words.`,
-
-    advanced: `Explain "${topic}" at an undergraduate college level. Include technical details, proper terminology, and some complexity. Assume prior knowledge of basic concepts. Keep it under 400 words.`,
-
-    expert: `Explain "${topic}" at a graduate/PhD level. Include nuanced details, current research context, technical depth, and field-specific terminology. Keep it under 500 words.`,
-  };
-
-  return prompts[level];
 }

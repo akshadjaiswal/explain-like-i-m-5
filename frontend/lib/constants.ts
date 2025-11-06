@@ -49,6 +49,13 @@ export const GEMINI_CONFIG = {
   API_BASE: "https://generativelanguage.googleapis.com/v1beta/models",
 } as const;
 
+// Groq API configuration
+export const GROQ_CONFIG = {
+  MODEL: "openai/gpt-oss-20b",
+  TEMPERATURE: 0.6,
+  MAX_TOKENS: 800,
+} as const;
+
 // Cache configuration
 export const CACHE_CONFIG = {
   TTL_DAYS: 30,
