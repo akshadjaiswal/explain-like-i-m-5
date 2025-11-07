@@ -13,7 +13,7 @@
 - Real-time streaming explanations using Google Gemini AI
 - Accelerated typewriter rendering with keyword highlighting
 - Smart caching system with Supabase (30-day TTL)
-- Rate-limit aware Gemini fallback between experimental and stable flash models
+- Resilient AI pipeline: Gemini 2.0 Flash → Groq → Gemini 2.5 Flash fallback chain
 - Search with autocomplete (300ms debounce)
 - Trending topics discovery on homepage
 - Shareable URLs with deep linking
@@ -35,7 +35,7 @@
 ### Backend
 - **Runtime**: Next.js API Routes (Node.js)
 - **Database**: Supabase (PostgreSQL)
-- **AI**: Google Gemini (v1beta SSE + cooldown-based fallback)
+- **AI**: Google Gemini + Groq (multi-provider fallback with SSE + SDK)
 - **Caching**: Supabase with 30-day TTL
 - **Streaming**: Server-Sent Events (SSE) via ReadableStream
 
@@ -80,11 +80,15 @@ explain-like-i-m-5/
 │   │   │   └── trending-topics.tsx # Homepage topic grid
 │   │   └── ui/                  # shadcn components
 │   ├── lib/
+│   │   ├── ai/
+│   │   │   └── prompts.ts       # Shared prompt templates for LLMs
 │   │   ├── constants.ts         # App config + complexity levels
 │   │   ├── utils/
 │   │   │   └── slugify.ts       # Topic slug utilities
+│   │   ├── groq/
+│   │   │   └── client.ts        # Groq SDK fallback client
 │   │   ├── gemini/
-│   │   │   └── client.ts        # AI client with streaming + fallback
+│   │   │   └── client.ts        # Gemini streaming client + fallback orchestration
 │   │   ├── cache/
 │   │   │   └── service.ts       # Caching logic
 │   │   ├── supabase/
@@ -121,9 +125,10 @@ explain-like-i-m-5/
    ↓
 4. POST /api/explain with topic + levels (only when at least one level missing)
    ↓
-5. Try Gemini models via rate-limit-aware fallback:
-   - `gemini-2.0-flash-exp`
-   - `gemini-2.5-flash` (skips temporarily disabled models automatically)
+5. Try AI providers with cooldown-aware fallback:
+   - `gemini-2.0-flash-exp` (primary SSE stream)
+   - Groq `openai/gpt-oss-20b` (single-shot fallback streamed as one chunk)
+   - `gemini-2.5-flash` (final safety net, skips temporarily disabled models automatically)
    ↓
 6. Stream response via SSE (levels handled sequentially; chunks forwarded as they arrive)
    ↓
@@ -154,8 +159,10 @@ explain-like-i-m-5/
 ### Core Business Logic
 | File | Purpose |
 |------|---------|
-| `lib/constants.ts` | Complexity levels, colors, Gemini config, app settings |
-| `lib/gemini/client.ts` | AI client with streaming + rate-limit-aware fallback (v1beta) |
+| `lib/ai/prompts.ts` | Centralized prompt templates reused across AI providers |
+| `lib/constants.ts` | Complexity levels, colors, AI config, app settings |
+| `lib/gemini/client.ts` | Gemini streaming client orchestrating rate-limit-aware fallback + Groq handoff |
+| `lib/groq/client.ts` | Groq SDK wrapper used as intermediate fallback model |
 | `lib/cache/service.ts` | Smart caching, topic management, trending logic |
 | `types/index.ts` | TypeScript interfaces for all data structures |
 
@@ -195,19 +202,18 @@ ADVANCED: College/undergraduate depth
 EXPERT: Graduate/PhD level detail
 ```
 
-### Gemini Configuration
-- **API Version**: v1beta (supports experimental streaming endpoints)
-- **Model Fallback**:
-  1. `gemini-2.0-flash-exp` (primary, experimental + fastest)
-  2. `gemini-2.5-flash` (higher quota fallback)
-- **Rate Limiting**: 429 responses parse `RetryInfo` and temporarily disable the offending model via an in-memory cooldown map, preventing repeated quota hits.
-- **Streaming**: SSE (`:streamGenerateContent`) with JSON chunk parsing; non-streaming path still available via `generateContent`.
+### AI Configuration
+- **Primary Provider**: Gemini v1beta SSE (`gemini-2.0-flash-exp`)
+- **Fallback Chain**: If primary fails or is rate-limited → Groq `openai/gpt-oss-20b` via SDK → Gemini `gemini-2.5-flash`
+- **Rate Limiting**: 429 responses parse `RetryInfo` and temporarily disable Gemini models via an in-memory cooldown map, preventing repeated quota hits.
+- **Streaming**: Gemini responses stream via SSE; Groq returns a single completion which is forwarded as one SSE chunk for consistency.
 - **Temperatures**:
   - Beginner: 0.8 (creative, analogies)
   - Intermediate: 0.6
   - Advanced: 0.4
   - Expert: 0.3 (precise, technical)
-- **Max Tokens**: 800 per level
+- **Max Tokens**: 800 per level across providers
+- **Environment**: `GEMINI_API_KEY` and `GROQ_API_KEY` must both be present in `.env.local`
 
 ### Caching Logic (cache/service.ts)
 - **TTL**: 30 days
