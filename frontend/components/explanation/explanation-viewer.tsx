@@ -1,5 +1,6 @@
 /**
- * Main explanation viewer component with streaming support
+ * Main explanation viewer component
+ * Uses non-streaming API with client-side animation for reliability
  */
 
 "use client";
@@ -14,6 +15,31 @@ interface ExplanationViewerProps {
   slug: string;
   topicTitle: string;
   cached: Explanation[] | null;
+}
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+const REQUEST_TIMEOUT_MS = 60000; // 60 seconds
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
+  }
 }
 
 export function ExplanationViewer({
@@ -31,10 +57,6 @@ export function ExplanationViewer({
     return initial;
   });
 
-  const [streamingStates, setStreamingStates] = useState<
-    Record<ComplexityLevel, boolean>
-  >({} as Record<ComplexityLevel, boolean>);
-
   const [cachedStates, setCachedStates] = useState<
     Record<ComplexityLevel, boolean>
   >(() => {
@@ -46,7 +68,9 @@ export function ExplanationViewer({
   });
 
   const [isLoading, setIsLoading] = useState(!cached || cached.length === 0);
+  const [loadingMessage, setLoadingMessage] = useState("Generating explanations...");
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Track if we've already fetched to prevent duplicate calls
   const hasFetchedRef = useRef(false);
@@ -60,10 +84,11 @@ export function ExplanationViewer({
 
       // Clear previous content immediately for better UX
       setExplanations({} as Record<ComplexityLevel, string>);
-      setStreamingStates({} as Record<ComplexityLevel, boolean>);
       setCachedStates({} as Record<ComplexityLevel, boolean>);
       setIsLoading(true);
       setError(null);
+      setRetryCount(0);
+      setLoadingMessage("Generating explanations...");
 
       // If we have cached data, populate immediately
       if (cached && cached.length > 0) {
@@ -92,105 +117,73 @@ export function ExplanationViewer({
 
     hasFetchedRef.current = true;
 
-    // Generate explanations with streaming
-    const generateExplanations = async () => {
+    // Generate explanations with retry logic
+    const generateExplanations = async (attemptNumber: number = 0) => {
       try {
-        const response = await fetch("/api/explain", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+        if (attemptNumber > 0) {
+          setLoadingMessage(`Retrying... (Attempt ${attemptNumber + 1}/${MAX_RETRIES + 1})`);
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attemptNumber));
+        } else {
+          setLoadingMessage("Generating explanations...");
+        }
+
+        const response = await fetchWithTimeout(
+          "/api/explain",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              topic: topicTitle,
+              levels: Object.values(COMPLEXITY_LEVELS),
+            }),
           },
-          body: JSON.stringify({
-            topic: topicTitle,
-            levels: Object.values(COMPLEXITY_LEVELS),
-          }),
-        });
+          REQUEST_TIMEOUT_MS
+        );
 
         if (!response.ok) {
-          throw new Error("Failed to generate explanations");
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.error || `Server returned ${response.status}`
+          );
         }
 
-        // Check if the response is streaming or JSON
-        const contentType = response.headers.get("content-type");
+        const data = await response.json();
 
-        if (contentType?.includes("text/event-stream")) {
-          // Handle streaming response
-          const reader = response.body?.getReader();
-          const decoder = new TextDecoder();
+        if (data.explanations) {
+          const newExplanations = {} as Record<ComplexityLevel, string>;
+          const newCached = {} as Record<ComplexityLevel, boolean>;
 
-          if (!reader) {
-            throw new Error("No reader available");
-          }
+          data.explanations.forEach((exp: Explanation) => {
+            newExplanations[exp.complexityLevel] = exp.content;
+            newCached[exp.complexityLevel] = data.cached || false;
+          });
 
-          while (true) {
-            const { done, value } = await reader.read();
-
-            if (done) break;
-
-            const chunk = decoder.decode(value);
-            const lines = chunk.split("\n");
-
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-
-                  if (data.error) {
-                    setError(data.error);
-                    setIsLoading(false);
-                    return;
-                  }
-
-                  if (data.level) {
-                    const level = data.level as ComplexityLevel;
-
-                    if (data.chunk) {
-                      // Append chunk to existing content
-                      setExplanations((prev) => ({
-                        ...prev,
-                        [level]: (prev[level] || "") + data.chunk,
-                      }));
-                      setStreamingStates((prev) => ({ ...prev, [level]: true }));
-                    }
-
-                    if (data.done) {
-                      setStreamingStates((prev) => ({ ...prev, [level]: false }));
-                      if (data.cached) {
-                        setCachedStates((prev) => ({ ...prev, [level]: true }));
-                      }
-                    }
-                  }
-                } catch (e) {
-                  console.error("Failed to parse SSE data:", e);
-                }
-              }
-            }
-          }
-
+          setExplanations(newExplanations);
+          setCachedStates(newCached);
           setIsLoading(false);
+          setError(null);
         } else {
-          // Handle JSON response (all cached)
-          const data = await response.json();
-
-          if (data.explanations) {
-            const newExplanations = {} as Record<ComplexityLevel, string>;
-            const newCached = {} as Record<ComplexityLevel, boolean>;
-
-            data.explanations.forEach((exp: Explanation) => {
-              newExplanations[exp.complexityLevel] = exp.content;
-              newCached[exp.complexityLevel] = true;
-            });
-
-            setExplanations(newExplanations);
-            setCachedStates(newCached);
-          }
-
-          setIsLoading(false);
+          throw new Error("Invalid response format");
         }
       } catch (err) {
-        console.error("Error generating explanations:", err);
+        console.error(`Error generating explanations (attempt ${attemptNumber + 1}):`, err);
+
+        const errorMessage =
+          err instanceof Error
+            ? err.message
+            : "Failed to generate explanations";
+
+        // Retry on failure (up to MAX_RETRIES)
+        if (attemptNumber < MAX_RETRIES) {
+          setRetryCount(attemptNumber + 1);
+          return generateExplanations(attemptNumber + 1);
+        }
+
+        // All retries exhausted
         setError(
-          err instanceof Error ? err.message : "Failed to generate explanations"
+          `${errorMessage}. Please try again or search for a different topic.`
         );
         setIsLoading(false);
       }
@@ -206,25 +199,49 @@ export function ExplanationViewer({
           <p className="text-lg font-medium text-destructive">
             Error: {error}
           </p>
-          <p className="text-sm text-muted-foreground">
-            Please try again or search for a different topic.
-          </p>
+          {retryCount > 0 && (
+            <p className="text-sm text-muted-foreground">
+              Failed after {retryCount + 1} attempt{retryCount > 0 ? "s" : ""}.
+            </p>
+          )}
+          <button
+            onClick={() => {
+              hasFetchedRef.current = false;
+              setError(null);
+              setRetryCount(0);
+              setIsLoading(true);
+              window.location.reload();
+            }}
+            className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
   }
 
   // Show skeleton if loading AND no content yet
-  const hasAnyContent = Object.values(explanations).some(content => content && content.length > 0);
+  const hasAnyContent = Object.values(explanations).some(
+    (content) => content && content.length > 0
+  );
 
   if (isLoading && !hasAnyContent) {
-    return <ExplanationLoadingSkeleton />;
+    return (
+      <div className="space-y-4">
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground animate-pulse">
+            {loadingMessage}
+          </p>
+        </div>
+        <ExplanationLoadingSkeleton />
+      </div>
+    );
   }
 
   return (
     <LevelTabs
       explanations={explanations}
-      streamingStates={streamingStates}
       cachedStates={cachedStates}
       isLoading={isLoading}
     />

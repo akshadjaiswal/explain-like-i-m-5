@@ -12,6 +12,7 @@ interface StreamingTextProps {
   text: string;
   isStreaming: boolean;
   className?: string;
+  startDelay?: number; // Delay in ms before starting animation (for staggered effect)
 }
 
 /**
@@ -279,16 +280,34 @@ export function StreamingText({
   text,
   isStreaming,
   className,
+  startDelay = 0,
 }: StreamingTextProps) {
   const [displayedText, setDisplayedText] = useState("");
   const [isAnimating, setIsAnimating] = useState(false);
+  const [hasStarted, setHasStarted] = useState(startDelay === 0);
   const displayedTextRef = useRef(displayedText);
 
   useEffect(() => {
     displayedTextRef.current = displayedText;
   }, [displayedText]);
 
+  // Handle start delay
   useEffect(() => {
+    if (startDelay > 0 && !hasStarted) {
+      const delayTimeout = setTimeout(() => {
+        setHasStarted(true);
+      }, startDelay);
+
+      return () => clearTimeout(delayTimeout);
+    }
+  }, [startDelay, hasStarted]);
+
+  useEffect(() => {
+    // Don't start animation until delay has passed
+    if (!hasStarted) {
+      return;
+    }
+
     const previousText = displayedTextRef.current;
 
     // If text is shorter or empty, just set it asynchronously for smoothness
@@ -348,7 +367,7 @@ export function StreamingText({
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [text, isStreaming]);
+  }, [text, isStreaming, hasStarted]);
 
   const formattedContent = formatText(displayedText);
 

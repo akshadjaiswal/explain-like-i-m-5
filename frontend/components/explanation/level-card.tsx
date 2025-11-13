@@ -16,21 +16,21 @@ import { cn } from "@/lib/utils";
 interface LevelCardProps {
   level: ComplexityLevel;
   content: string;
-  isStreaming?: boolean;
   cached?: boolean;
   isLoading?: boolean;
+  startDelay?: number;
   className?: string;
 }
 
 export function LevelCard({
   level,
   content,
-  isStreaming = false,
   cached = false,
   isLoading = false,
+  startDelay = 0,
   className,
 }: LevelCardProps) {
-  const showLoadingState = isLoading || (isStreaming && !content);
+  const showLoadingState = isLoading && !content;
 
   return (
     <Card className={cn("transition-all duration-300", className)}>
@@ -68,15 +68,14 @@ export function LevelCard({
                 <div className="h-1.5 w-1.5 bg-primary rounded-full animate-bounce" style={{animationDelay: "150ms"}}></div>
                 <div className="h-1.5 w-1.5 bg-primary rounded-full animate-bounce" style={{animationDelay: "300ms"}}></div>
               </div>
-              <p className="text-sm font-medium">
-                {isStreaming ? "Streaming explanation..." : "Generating explanation..."}
-              </p>
+              <p className="text-sm font-medium">Generating explanation...</p>
             </div>
           ) : content ? (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
               <StreamingText
                 text={content}
-                isStreaming={isStreaming}
+                isStreaming={false}
+                startDelay={startDelay}
                 className="text-foreground"
               />
             </div>

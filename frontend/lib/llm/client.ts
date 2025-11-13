@@ -255,6 +255,23 @@ export async function* generateExplanationStream(
 }
 
 /**
+ * Generate a complete explanation by collecting streamed chunks
+ * This provides the benefits of streaming (faster TTFB) with complete output
+ * Priority: Groq (primary) → Gemini 2.0 Flash → Gemini 2.5 Flash
+ */
+export async function generateExplanationComplete(
+  options: GenerateOptions
+): Promise<string> {
+  let fullText = "";
+
+  for await (const chunk of generateExplanationStream(options)) {
+    fullText += chunk;
+  }
+
+  return fullText;
+}
+
+/**
  * Generate a complete explanation (non-streaming) with multi-provider fallback
  * Priority: Groq (primary) → Gemini 2.0 Flash → Gemini 2.5 Flash
  */

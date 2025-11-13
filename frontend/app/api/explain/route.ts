@@ -1,11 +1,11 @@
 /**
  * API route for generating explanations
- * Handles both streaming and cached responses
+ * Returns complete JSON responses for better reliability
  * Uses multi-provider LLM client: Groq (primary) → Gemini fallbacks
  */
 
 import { NextRequest } from "next/server";
-import { generateExplanationStream } from "@/lib/llm/client";
+import { generateExplanationComplete } from "@/lib/llm/client";
 import {
   getCachedExplanations,
   saveExplanation,
@@ -42,94 +42,71 @@ export async function POST(request: NextRequest) {
     const cached = await getCachedExplanations(topicSlug);
     const cachedByLevel = new Map<ComplexityLevel, Explanation>();
     cached?.forEach((item) => cachedByLevel.set(item.complexityLevel, item));
-    const allLevelsCached = requestedLevels.every((level) =>
-      cachedByLevel.has(level)
-    );
-
-    if (cached && allLevelsCached) {
-      // All explanations are cached - return immediately
-      await getOrCreateTopic(topicSlug, topicTitle);
-
-      return Response.json({
-        topicSlug,
-        topicTitle,
-        explanations: cached,
-        cached: true,
-      });
-    }
 
     // Create or update topic
     await getOrCreateTopic(topicSlug, topicTitle);
 
-    // Generate missing explanations with streaming
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
+    // Separate cached and missing levels
+    const results: Explanation[] = [];
+    const levelsToGenerate: ComplexityLevel[] = [];
+
+    for (const level of requestedLevels) {
+      const cachedLevel = cachedByLevel.get(level);
+      if (cachedLevel) {
+        results.push(cachedLevel);
+      } else {
+        levelsToGenerate.push(level);
+      }
+    }
+
+    // Generate missing levels in parallel for speed
+    if (levelsToGenerate.length > 0) {
+      console.log(`Generating ${levelsToGenerate.length} missing levels in parallel...`);
+
+      const generationPromises = levelsToGenerate.map(async (level) => {
         try {
-          for (const level of requestedLevels) {
-            // Check if this level is cached
-            const cachedLevel = cachedByLevel.get(level);
-
-            if (cachedLevel) {
-              // Send cached explanation
-              const chunk = JSON.stringify({
-                level,
-                content: cachedLevel.content,
-                done: true,
-                cached: true,
-              });
-              controller.enqueue(encoder.encode(`data: ${chunk}\n\n`));
-            } else {
-              // Generate new explanation with streaming
-              let fullContent = "";
-
-              for await (const text of generateExplanationStream({
-                topic: topicTitle,
-                level,
-              })) {
-                fullContent += text;
-
-                const chunk = JSON.stringify({
-                  level,
-                  chunk: text,
-                  done: false,
-                  cached: false,
-                });
-                controller.enqueue(encoder.encode(`data: ${chunk}\n\n`));
-              }
-
-              // Save to cache
-              await saveExplanation(topicSlug, topicTitle, level, fullContent);
-
-              // Send completion marker
-              const doneChunk = JSON.stringify({
-                level,
-                done: true,
-                cached: false,
-              });
-              controller.enqueue(encoder.encode(`data: ${doneChunk}\n\n`));
-            }
-          }
-
-          controller.close();
-        } catch (error) {
-          console.error("Streaming error:", error);
-          const errorChunk = JSON.stringify({
-            error:
-              error instanceof Error ? error.message : "Unknown error occurred",
+          console.log(`🔄 Generating ${level} level...`);
+          const content = await generateExplanationComplete({
+            topic: topicTitle,
+            level,
           });
-          controller.enqueue(encoder.encode(`data: ${errorChunk}\n\n`));
-          controller.close();
-        }
-      },
-    });
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+          // Save to cache
+          const explanation = await saveExplanation(
+            topicSlug,
+            topicTitle,
+            level,
+            content
+          );
+
+          console.log(`✅ ${level} level generated successfully`);
+          return explanation;
+        } catch (error) {
+          console.error(`❌ Failed to generate ${level} level:`, error);
+          throw new Error(
+            `Failed to generate ${level} explanation: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`
+          );
+        }
+      });
+
+      // Wait for all generations to complete
+      const generatedExplanations = await Promise.all(generationPromises);
+      results.push(...generatedExplanations);
+    }
+
+    // Sort results to match requested order
+    const sortedResults = requestedLevels
+      .map((level) => results.find((r) => r.complexityLevel === level))
+      .filter((r): r is Explanation => r !== undefined);
+
+    return Response.json({
+      topicSlug,
+      topicTitle,
+      explanations: sortedResults,
+      cached: levelsToGenerate.length === 0,
+      generatedCount: levelsToGenerate.length,
     });
   } catch (error) {
     console.error("API error:", error);
