@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils";
 
 interface LevelTabsProps {
   explanations: Record<ComplexityLevel, string>;
-  streamingStates?: Record<ComplexityLevel, boolean>;
   cachedStates?: Record<ComplexityLevel, boolean>;
   defaultLevel?: ComplexityLevel;
   isLoading?: boolean;
@@ -29,9 +28,16 @@ const tabStyles: Record<ComplexityLevel, string> = {
     "data-[state=active]:bg-rose-500/10 data-[state=active]:text-rose-700 dark:data-[state=active]:text-rose-400",
 };
 
+// Stagger delays for each level (in ms) to create progressive reveal effect
+const LEVEL_DELAYS: Record<ComplexityLevel, number> = {
+  beginner: 0,          // Start immediately
+  intermediate: 200,    // 200ms delay
+  advanced: 400,        // 400ms delay
+  expert: 600,          // 600ms delay
+};
+
 export function LevelTabs({
   explanations,
-  streamingStates = {} as Record<ComplexityLevel, boolean>,
   cachedStates = {} as Record<ComplexityLevel, boolean>,
   defaultLevel = COMPLEXITY_LEVELS.BEGINNER,
   isLoading = false,
@@ -67,9 +73,9 @@ export function LevelTabs({
           <LevelCard
             level={level}
             content={explanations[level] || ""}
-            isStreaming={streamingStates[level] || false}
             cached={cachedStates[level] || false}
             isLoading={isLoading}
+            startDelay={LEVEL_DELAYS[level]}
           />
         </TabsContent>
       ))}

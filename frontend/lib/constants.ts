@@ -33,11 +33,18 @@ export const LEVEL_DESCRIPTIONS = {
   [COMPLEXITY_LEVELS.EXPERT]: "Graduate/PhD level detail",
 } as const;
 
-// Gemini API configuration
+// Groq API configuration (PRIMARY PROVIDER)
+export const GROQ_CONFIG = {
+  MODEL: "openai/gpt-oss-20b",    // Meta Llama 3.1 70B - Fast and reliable
+  TEMPERATURE: 0.6,               // Balanced creativity and accuracy
+  MAX_TOKENS: 800,
+} as const;
+
+// Gemini API configuration (FALLBACK PROVIDER)
 export const GEMINI_CONFIG = {
   MODELS: [
-    "gemini-2.0-flash-exp",      // Fastest, experimental (try first)
-    "gemini-2.5-flash",          // Higher quota, production-ready fallback
+    "gemini-2.0-flash-exp",      // Fastest, experimental (first fallback)
+    "gemini-2.5-flash",          // Higher quota, production-ready (second fallback)
   ],
   TEMPERATURES: {
     [COMPLEXITY_LEVELS.BEGINNER]: 0.8,
@@ -47,13 +54,6 @@ export const GEMINI_CONFIG = {
   },
   MAX_TOKENS: 800,
   API_BASE: "https://generativelanguage.googleapis.com/v1beta/models",
-} as const;
-
-// Groq API configuration
-export const GROQ_CONFIG = {
-  MODEL: "openai/gpt-oss-20b",
-  TEMPERATURE: 0.6,
-  MAX_TOKENS: 800,
 } as const;
 
 // Cache configuration
