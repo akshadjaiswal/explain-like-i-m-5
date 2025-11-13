@@ -1,12 +1,15 @@
 /**
- * Component for displaying streaming text with rich formatting
- * Supports markdown-like formatting, keyword highlighting, and proper typography
+ * Component for displaying streaming text with proper markdown rendering
+ * Uses react-markdown with remark-gfm for full markdown support including tables
  */
 
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { Components } from "react-markdown";
 
 interface StreamingTextProps {
   text: string;
@@ -15,266 +18,132 @@ interface StreamingTextProps {
   startDelay?: number; // Delay in ms before starting animation (for staggered effect)
 }
 
-/**
- * Parse text and apply rich formatting:
- * - **bold** → <strong>
- * - *italic* → <em>
- * - `code` → <code>
- * - Bullet points (- or •) → styled lists
- * - Numbered lists (1. 2. etc) → styled lists
- * - Technical keywords → highlighted
- */
-function formatText(text: string): React.ReactNode[] {
-  if (!text) return [];
+// Custom components for markdown elements with compact Tailwind styling
+const markdownComponents: Components = {
+  // Headers - compact sizing
+  h1: ({ node, ...props }) => (
+    <h1 className="text-lg md:text-xl font-bold mb-2 mt-3 text-foreground" {...props} />
+  ),
+  h2: ({ node, ...props }) => (
+    <h2 className="text-base md:text-lg font-bold mb-1.5 mt-3 text-foreground" {...props} />
+  ),
+  h3: ({ node, ...props }) => (
+    <h3 className="text-sm md:text-base font-semibold mb-1.5 mt-2.5 text-foreground" {...props} />
+  ),
+  h4: ({ node, ...props }) => (
+    <h4 className="text-sm font-semibold mb-1 mt-2 text-foreground" {...props} />
+  ),
+  h5: ({ node, ...props }) => (
+    <h5 className="text-xs md:text-sm font-semibold mb-1 mt-2 text-foreground" {...props} />
+  ),
+  h6: ({ node, ...props }) => (
+    <h6 className="text-xs font-semibold mb-1 mt-2 text-muted-foreground" {...props} />
+  ),
 
-  const lines = text.split("\n");
-  const elements: React.ReactNode[] = [];
-  let currentParagraph: string[] = [];
-  let inList = false;
-  let listItems: React.ReactNode[] = [];
-  let listType: "bullet" | "numbered" | null = null;
+  // Paragraphs - small text, tight spacing
+  p: ({ node, ...props }) => (
+    <p className="mb-2 leading-snug text-sm text-foreground" {...props} />
+  ),
 
-  const flushParagraph = (index: number) => {
-    if (currentParagraph.length > 0) {
-      const paragraphText = currentParagraph.join(" ");
-      elements.push(
-        <p key={`p-${index}`} className="mb-4 leading-relaxed">
-          {formatInlineText(paragraphText)}
-        </p>
-      );
-      currentParagraph = [];
-    }
-  };
+  // Lists - compact spacing
+  ul: ({ node, ...props }) => (
+    <ul className="mb-2 ml-4 space-y-0.5 list-disc text-sm" {...props} />
+  ),
+  ol: ({ node, ...props }) => (
+    <ol className="mb-2 ml-4 space-y-0.5 list-decimal text-sm" {...props} />
+  ),
+  li: ({ node, ...props }) => (
+    <li className="text-foreground leading-snug text-sm" {...props} />
+  ),
 
-  const flushList = (index: number) => {
-    if (listItems.length > 0) {
-      if (listType === "bullet") {
-        elements.push(
-          <ul key={`ul-${index}`} className="mb-4 ml-4 space-y-2 list-none">
-            {listItems}
-          </ul>
-        );
-      } else {
-        elements.push(
-          <ol key={`ol-${index}`} className="mb-4 ml-4 space-y-2 list-none">
-            {listItems}
-          </ol>
-        );
-      }
-      listItems = [];
-      listType = null;
-    }
-    inList = false;
-  };
+  // Tables - compact with remark-gfm support
+  table: ({ node, ...props }) => (
+    <div className="overflow-x-auto my-3 rounded-md border border-border">
+      <table className="min-w-full divide-y divide-border text-xs md:text-sm" {...props} />
+    </div>
+  ),
+  thead: ({ node, ...props }) => <thead className="bg-muted/50" {...props} />,
+  tbody: ({ node, ...props }) => (
+    <tbody className="divide-y divide-border bg-background" {...props} />
+  ),
+  tr: ({ node, ...props }) => (
+    <tr className="hover:bg-muted/30 transition-colors" {...props} />
+  ),
+  th: ({ node, ...props }) => (
+    <th
+      className="px-2 md:px-3 py-1.5 md:py-2 text-left text-xs md:text-sm font-semibold text-foreground border-r border-border last:border-r-0"
+      {...props}
+    />
+  ),
+  td: ({ node, ...props }) => (
+    <td
+      className="px-2 md:px-3 py-1.5 md:py-2 text-xs md:text-sm text-foreground border-r border-border last:border-r-0 leading-tight"
+      {...props}
+    />
+  ),
 
-  lines.forEach((line, index) => {
-    const trimmedLine = line.trim();
-
-    // Empty line - flush current paragraph/list
-    if (!trimmedLine) {
-      flushParagraph(index);
-      flushList(index);
-      return;
-    }
-
-    // Bullet point detection
-    const bulletMatch = trimmedLine.match(/^[-•]\s+(.+)$/);
-    if (bulletMatch) {
-      flushParagraph(index);
-      if (!inList || listType !== "bullet") {
-        flushList(index);
-        inList = true;
-        listType = "bullet";
-      }
-      listItems.push(
-        <li key={`li-${index}`} className="flex items-start gap-2">
-          <span className="text-primary mt-0.5 font-bold">•</span>
-          <span className="flex-1">{formatInlineText(bulletMatch[1])}</span>
-        </li>
-      );
-      return;
-    }
-
-    // Numbered list detection
-    const numberedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
-    if (numberedMatch) {
-      flushParagraph(index);
-      if (!inList || listType !== "numbered") {
-        flushList(index);
-        inList = true;
-        listType = "numbered";
-      }
-      listItems.push(
-        <li key={`li-${index}`} className="flex items-start gap-2">
-          <span className="text-primary font-bold font-mono min-w-[1.5rem]">
-            {numberedMatch[1]}.
-          </span>
-          <span className="flex-1">{formatInlineText(numberedMatch[2])}</span>
-        </li>
-      );
-      return;
-    }
-
-    // Regular text - add to current paragraph
-    flushList(index);
-    currentParagraph.push(trimmedLine);
-  });
-
-  // Flush any remaining content
-  flushParagraph(lines.length);
-  flushList(lines.length);
-
-  return elements;
-}
-
-/**
- * Format inline text with bold, italic, code, and keyword highlighting
- */
-function formatInlineText(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  let remaining = text;
-  let keyCounter = 0;
-
-  // Technical keywords to highlight
-  const keywords = [
-    "AI", "API", "CPU", "GPU", "RAM", "HTTP", "HTTPS", "JSON", "XML", "SQL",
-    "quantum", "algorithm", "blockchain", "neural", "machine learning",
-    "deep learning", "cryptocurrency", "encryption", "database", "server",
-    "protocol", "framework", "library", "container", "cloud", "microservice",
-  ];
-
-  while (remaining) {
-    // Try to match **bold**
-    const boldMatch = remaining.match(/\*\*([^*]+)\*\*/);
-    if (boldMatch && boldMatch.index !== undefined) {
-      // Add text before match
-      if (boldMatch.index > 0) {
-        parts.push(
-          <span key={`text-${keyCounter++}`}>
-            {highlightKeywords(remaining.substring(0, boldMatch.index), keywords, keyCounter)}
-          </span>
-        );
-      }
-      // Add bold text
-      parts.push(
-        <strong key={`bold-${keyCounter++}`} className="font-bold text-foreground">
-          {boldMatch[1]}
-        </strong>
-      );
-      remaining = remaining.substring(boldMatch.index + boldMatch[0].length);
-      continue;
-    }
-
-    // Try to match *italic*
-    const italicMatch = remaining.match(/\*([^*]+)\*/);
-    if (italicMatch && italicMatch.index !== undefined) {
-      if (italicMatch.index > 0) {
-        parts.push(
-          <span key={`text-${keyCounter++}`}>
-            {highlightKeywords(remaining.substring(0, italicMatch.index), keywords, keyCounter)}
-          </span>
-        );
-      }
-      parts.push(
-        <em key={`italic-${keyCounter++}`} className="italic text-muted-foreground">
-          {italicMatch[1]}
-        </em>
-      );
-      remaining = remaining.substring(italicMatch.index + italicMatch[0].length);
-      continue;
-    }
-
-    // Try to match `code`
-    const codeMatch = remaining.match(/`([^`]+)`/);
-    if (codeMatch && codeMatch.index !== undefined) {
-      if (codeMatch.index > 0) {
-        parts.push(
-          <span key={`text-${keyCounter++}`}>
-            {highlightKeywords(remaining.substring(0, codeMatch.index), keywords, keyCounter)}
-          </span>
-        );
-      }
-      parts.push(
+  // Code - compact monospace styling
+  code: ({ node, inline, className, children, ...props }) => {
+    if (inline) {
+      return (
         <code
-          key={`code-${keyCounter++}`}
-          className="px-1.5 py-0.5 rounded bg-muted text-primary font-mono text-xs"
+          className="px-1 py-0.5 rounded bg-muted/80 text-primary font-mono text-[11px] md:text-xs font-medium"
+          {...props}
         >
-          {codeMatch[1]}
+          {children}
         </code>
       );
-      remaining = remaining.substring(codeMatch.index + codeMatch[0].length);
-      continue;
     }
-
-    // No more matches - add remaining text with keyword highlighting
-    parts.push(
-      <span key={`text-${keyCounter++}`}>
-        {highlightKeywords(remaining, keywords, keyCounter)}
-      </span>
+    return (
+      <code
+        className={cn(
+          "block px-3 py-2 my-2 rounded-md bg-muted/80 font-mono text-[11px] md:text-xs overflow-x-auto leading-tight",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </code>
     );
-    break;
-  }
+  },
+  pre: ({ node, ...props }) => <pre className="mb-2 overflow-x-auto" {...props} />,
 
-  return parts;
-}
+  // Blockquotes - compact
+  blockquote: ({ node, ...props }) => (
+    <blockquote
+      className="border-l-2 border-primary pl-3 italic my-2 text-muted-foreground text-sm"
+      {...props}
+    />
+  ),
 
-/**
- * Highlight technical keywords in text
- */
-function highlightKeywords(
-  text: string,
-  keywords: string[],
-  baseKey: number
-): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const remaining = text;
-  let counter = 0;
+  // Links - compact
+  a: ({ node, ...props }) => (
+    <a
+      className="text-primary hover:underline font-medium text-sm"
+      target="_blank"
+      rel="noopener noreferrer"
+      {...props}
+    />
+  ),
 
-  // Create case-insensitive regex for keywords
-  const keywordPattern = new RegExp(
-    `\\b(${keywords.join("|")})\\b`,
-    "gi"
-  );
+  // Horizontal rule
+  hr: ({ node, ...props }) => <hr className="my-3 border-t border-border" {...props} />,
 
-  const matches = Array.from(remaining.matchAll(keywordPattern));
-  let lastIndex = 0;
+  // Strong/Bold
+  strong: ({ node, ...props }) => (
+    <strong className="font-bold text-foreground" {...props} />
+  ),
 
-  matches.forEach((match) => {
-    if (match.index !== undefined) {
-      // Add text before keyword
-      if (match.index > lastIndex) {
-        parts.push(
-          <span key={`kw-text-${baseKey}-${counter++}`}>
-            {remaining.substring(lastIndex, match.index)}
-          </span>
-        );
-      }
+  // Em/Italic
+  em: ({ node, ...props }) => (
+    <em className="italic text-muted-foreground" {...props} />
+  ),
 
-      // Add highlighted keyword
-      parts.push(
-        <span
-          key={`kw-${baseKey}-${counter++}`}
-          className="text-primary font-semibold"
-        >
-          {match[0]}
-        </span>
-      );
-
-      lastIndex = match.index + match[0].length;
-    }
-  });
-
-  // Add remaining text
-  if (lastIndex < remaining.length) {
-    parts.push(
-      <span key={`kw-text-${baseKey}-${counter++}`}>
-        {remaining.substring(lastIndex)}
-      </span>
-    );
-  }
-
-  return parts.length > 0 ? parts : [text];
-}
+  // Strikethrough (GFM)
+  del: ({ node, ...props }) => (
+    <del className="line-through text-muted-foreground" {...props} />
+  ),
+};
 
 export function StreamingText({
   text,
@@ -369,16 +238,14 @@ export function StreamingText({
     return () => window.cancelAnimationFrame(frameId);
   }, [text, isStreaming, hasStarted]);
 
-  const formattedContent = formatText(displayedText);
-
   return (
-    <div className={cn("relative", className)}>
-      <div className="text-sm text-foreground space-y-0">
-        {formattedContent}
-        {(isStreaming || isAnimating) && (
-          <span className="inline-block w-2 h-4 ml-1 bg-primary animate-pulse" />
-        )}
-      </div>
+    <div className={cn("relative text-sm", className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {displayedText}
+      </ReactMarkdown>
+      {(isStreaming || isAnimating) && (
+        <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-primary animate-pulse" />
+      )}
     </div>
   );
 }
