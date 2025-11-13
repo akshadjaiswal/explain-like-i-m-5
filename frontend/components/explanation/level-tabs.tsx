@@ -16,6 +16,9 @@ interface LevelTabsProps {
   defaultLevel?: ComplexityLevel;
   isLoading?: boolean;
   className?: string;
+  onRetryLevel?: (level: ComplexityLevel) => void;
+  retryingLevels?: Record<ComplexityLevel, boolean>;
+  levelErrors?: Record<ComplexityLevel, string | null>;
 }
 
 const tabStyles: Record<ComplexityLevel, string> = {
@@ -42,6 +45,9 @@ export function LevelTabs({
   defaultLevel = COMPLEXITY_LEVELS.BEGINNER,
   isLoading = false,
   className,
+  onRetryLevel,
+  retryingLevels = {} as Record<ComplexityLevel, boolean>,
+  levelErrors = {} as Record<ComplexityLevel, string | null>,
 }: LevelTabsProps) {
   const levels = Object.values(COMPLEXITY_LEVELS) as ComplexityLevel[];
 
@@ -76,6 +82,9 @@ export function LevelTabs({
             cached={cachedStates[level] || false}
             isLoading={isLoading}
             startDelay={LEVEL_DELAYS[level]}
+            error={levelErrors[level] || null}
+            isRetrying={retryingLevels[level] || false}
+            onRetry={onRetryLevel ? () => onRetryLevel(level) : undefined}
           />
         </TabsContent>
       ))}
