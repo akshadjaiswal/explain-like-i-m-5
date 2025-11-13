@@ -1,10 +1,11 @@
 /**
  * API route for generating explanations
  * Handles both streaming and cached responses
+ * Uses multi-provider LLM client: Groq (primary) → Gemini fallbacks
  */
 
 import { NextRequest } from "next/server";
-import { generateExplanationStream } from "@/lib/gemini/client";
+import { generateExplanationStream } from "@/lib/llm/client";
 import {
   getCachedExplanations,
   saveExplanation,

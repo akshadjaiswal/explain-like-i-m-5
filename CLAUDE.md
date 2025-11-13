@@ -10,10 +10,10 @@
 
 ### Core Features
 - 4 progressive complexity levels: Beginner, Intermediate, Advanced, Expert
-- Real-time streaming explanations using Google Gemini AI
+- Real-time streaming explanations using AI (Groq primary, Gemini fallbacks)
 - Accelerated typewriter rendering with keyword highlighting
 - Smart caching system with Supabase (30-day TTL)
-- Resilient AI pipeline: Gemini 2.0 Flash → Groq → Gemini 2.5 Flash fallback chain
+- Resilient AI pipeline: **Groq (primary) → Gemini 2.0 Flash → Gemini 2.5 Flash** fallback chain
 - Search with autocomplete (300ms debounce)
 - Trending topics discovery on homepage
 - Shareable URLs with deep linking
@@ -35,7 +35,7 @@
 ### Backend
 - **Runtime**: Next.js API Routes (Node.js)
 - **Database**: Supabase (PostgreSQL)
-- **AI**: Google Gemini + Groq (multi-provider fallback with SSE + SDK)
+- **AI**: Groq (primary) + Google Gemini (fallback) - multi-provider with SSE + SDK
 - **Caching**: Supabase with 30-day TTL
 - **Streaming**: Server-Sent Events (SSE) via ReadableStream
 
@@ -85,10 +85,12 @@ explain-like-i-m-5/
 │   │   ├── constants.ts         # App config + complexity levels
 │   │   ├── utils/
 │   │   │   └── slugify.ts       # Topic slug utilities
+│   │   ├── llm/
+│   │   │   └── client.ts        # Multi-provider LLM client (Groq primary + Gemini fallbacks)
 │   │   ├── groq/
-│   │   │   └── client.ts        # Groq SDK fallback client
-│   │   ├── gemini/
-│   │   │   └── client.ts        # Gemini streaming client + fallback orchestration
+│   │   │   └── client.ts        # Groq SDK client with streaming support
+│   │   ├── gemini/ (deprecated - logic moved to llm/client.ts)
+│   │   │   └── client.ts        # Old Gemini-first client (kept for reference)
 │   │   ├── cache/
 │   │   │   └── service.ts       # Caching logic
 │   │   ├── supabase/
@@ -126,9 +128,9 @@ explain-like-i-m-5/
 4. POST /api/explain with topic + levels (only when at least one level missing)
    ↓
 5. Try AI providers with cooldown-aware fallback:
-   - `gemini-2.0-flash-exp` (primary SSE stream)
-   - Groq `openai/gpt-oss-20b` (single-shot fallback streamed as one chunk)
-   - `gemini-2.5-flash` (final safety net, skips temporarily disabled models automatically)
+   - **Groq `openai/gpt-oss-20b` (PRIMARY - fast streaming)**
+   - `gemini-2.0-flash-exp` (first fallback - SSE stream)
+   - `gemini-2.5-flash` (final fallback - skips temporarily disabled models automatically)
    ↓
 6. Stream response via SSE (levels handled sequentially; chunks forwarded as they arrive)
    ↓
@@ -160,9 +162,10 @@ explain-like-i-m-5/
 | File | Purpose |
 |------|---------|
 | `lib/ai/prompts.ts` | Centralized prompt templates reused across AI providers |
-| `lib/constants.ts` | Complexity levels, colors, AI config, app settings |
-| `lib/gemini/client.ts` | Gemini streaming client orchestrating rate-limit-aware fallback + Groq handoff |
-| `lib/groq/client.ts` | Groq SDK wrapper used as intermediate fallback model |
+| `lib/constants.ts` | Complexity levels, colors, AI config (Groq primary, Gemini fallback) |
+| `lib/llm/client.ts` | Multi-provider LLM orchestrator: Groq (primary) → Gemini fallbacks with rate-limit handling |
+| `lib/groq/client.ts` | Groq SDK client with streaming support (primary provider) |
+| `lib/gemini/client.ts` | (DEPRECATED) Old Gemini-first client - kept for reference |
 | `lib/cache/service.ts` | Smart caching, topic management, trending logic |
 | `types/index.ts` | TypeScript interfaces for all data structures |
 
@@ -203,23 +206,23 @@ EXPERT: Graduate/PhD level detail
 ```
 
 ### AI Configuration
-- **Primary Provider**: Gemini v1beta SSE (`gemini-2.0-flash-exp`)
-- **Fallback Chain**: If primary fails or is rate-limited → Groq `openai/gpt-oss-20b` via SDK → Gemini `gemini-2.5-flash`
-- **Rate Limiting**: 429 responses parse `RetryInfo` and temporarily disable Gemini models via an in-memory cooldown map, preventing repeated quota hits.
-- **Streaming**: Gemini responses stream via SSE; Groq returns a single completion which is forwarded as one SSE chunk for consistency.
-- **Temperatures**:
-  - Beginner: 0.8 (creative, analogies)
-  - Intermediate: 0.6
-  - Advanced: 0.4
-  - Expert: 0.3 (precise, technical)
+- **Primary Provider**: Groq `openai/gpt-oss-20b` (Meta Llama 3.1 70B)
+- **Fallback Chain**: If Groq fails or is rate-limited → Gemini `gemini-2.0-flash-exp` → Gemini `gemini-2.5-flash`
+- **Rate Limiting**:
+  - Groq: Handles 429 responses with proper error propagation
+  - Gemini: 429 responses parse `RetryInfo` and temporarily disable models via in-memory cooldown map
+- **Streaming**: Both Groq and Gemini support native streaming via async generators
+  - Groq: Streams via Groq SDK with async iteration
+  - Gemini: Streams via SSE (Server-Sent Events)
+- **Temperature**: 0.6 (balanced creativity and accuracy) - consistent across all complexity levels
 - **Max Tokens**: 800 per level across providers
-- **Environment**: `GEMINI_API_KEY` and `GROQ_API_KEY` must both be present in `.env.local`
+- **Environment**: `GROQ_API_KEY` (required) and `GEMINI_API_KEY` (optional fallback) in `.env.local`
 
 ### Caching Logic (cache/service.ts)
 - **TTL**: 30 days
 - **Cache Key**: topic_slug + complexity_level
 - **Update**: last_accessed, access_count on cache hit
-- **Partial Hits**: Builds a per-level map; cached levels stream instantly while only missing ones trigger Gemini
+- **Partial Hits**: Builds a per-level map; cached levels stream instantly while only missing ones trigger LLM generation
 - **Trending**: Calculated by view_count (DESC)
 - **Background Refresh**: Not implemented (Phase 2)
 - **Types**: Uses `Database` generated types (`Insert`/`Update`) with explicit relationships for type-safe Supabase calls
@@ -459,6 +462,45 @@ CREATE INDEX idx_explanations_level ON explanations(complexity_level);
 ---
 
 ## 🔄 Recent Changes
+
+### 2025-11-13 (Groq as Primary Provider)
+
+**MAJOR ARCHITECTURE CHANGE - LLM Provider Priority Switch**:
+- **Problem**: Gemini 2.5 Flash Exp experiencing frequent errors and rate limiting
+- **Solution**: Switched to Groq as primary provider with Gemini as fallback
+- **New Provider Chain**: **Groq (primary) → Gemini 2.0 Flash → Gemini 2.5 Flash**
+- **Changes Made**:
+  - ✅ **Enhanced Groq Client** (`lib/groq/client.ts`):
+    - Added streaming support via async generators
+    - Improved error handling with proper status codes
+    - Added rate limit detection and retry information
+  - ✅ **New Multi-Provider Client** (`lib/llm/client.ts`):
+    - Centralized LLM orchestration logic
+    - Tries Groq first, falls back to Gemini models on failure
+    - Maintains rate-limit cooldown tracking for Gemini
+  - ✅ **Updated Configuration** (`lib/constants.ts`):
+    - Groq marked as PRIMARY PROVIDER
+    - Gemini marked as FALLBACK PROVIDER
+    - Updated comments to reflect new architecture
+  - ✅ **Updated API Routes** (`app/api/explain/route.ts`):
+    - Changed imports from `lib/gemini/client` to `lib/llm/client`
+    - No logic changes needed (abstraction layer handles provider switching)
+  - ✅ **Documentation Updated** (`CLAUDE.md`):
+    - All references to provider priority updated
+    - Data flow diagrams reflect new provider chain
+    - File structure updated to show deprecated gemini client
+- **Benefits**:
+  - Groq's fast inference (Meta Llama 3.1 70B) tried first
+  - Better reliability with fewer errors
+  - Maintains robust fallback chain for resilience
+  - No frontend changes required
+- **Files Modified**:
+  - `lib/groq/client.ts` - Enhanced with streaming
+  - `lib/llm/client.ts` - New multi-provider orchestrator
+  - `lib/constants.ts` - Updated provider priority
+  - `app/api/explain/route.ts` - Updated imports
+  - `CLAUDE.md` - Comprehensive documentation update
+- **Impact**: Significantly improved reliability and reduced errors while maintaining fallback resilience
 
 ### 2025-01-08 (Rate-Limit Fallback, Faster Streaming, Supabase Types)
 
