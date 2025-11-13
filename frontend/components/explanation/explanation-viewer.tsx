@@ -72,6 +72,15 @@ export function ExplanationViewer({
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
+  // Per-level retry state
+  const [retryingLevels, setRetryingLevels] = useState<
+    Record<ComplexityLevel, boolean>
+  >({} as Record<ComplexityLevel, boolean>);
+
+  const [levelErrors, setLevelErrors] = useState<
+    Record<ComplexityLevel, string | null>
+  >({} as Record<ComplexityLevel, string | null>);
+
   // Track if we've already fetched to prevent duplicate calls
   const hasFetchedRef = useRef(false);
   const currentSlugRef = useRef(slug);
@@ -192,6 +201,59 @@ export function ExplanationViewer({
     generateExplanations();
   }, [slug]); // Only re-run when slug changes, not on every render
 
+  // Handler for retrying a single level
+  const handleRetryLevel = async (level: ComplexityLevel) => {
+    console.log(`🔄 Retrying level: ${level}`);
+
+    // Set retrying state
+    setRetryingLevels((prev) => ({ ...prev, [level]: true }));
+    setLevelErrors((prev) => ({ ...prev, [level]: null }));
+
+    try {
+      const response = await fetchWithTimeout(
+        "/api/explain/retry",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            topic: topicTitle,
+            topicSlug: slug,
+            level,
+          }),
+        },
+        REQUEST_TIMEOUT_MS
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.explanation) {
+        // Update the explanation for this level
+        setExplanations((prev) => ({
+          ...prev,
+          [level]: data.explanation.content,
+        }));
+        setCachedStates((prev) => ({ ...prev, [level]: false }));
+        console.log(`✅ Successfully retried ${level} level`);
+      } else {
+        throw new Error("Invalid response format");
+      }
+    } catch (err) {
+      console.error(`❌ Failed to retry ${level} level:`, err);
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to generate explanation";
+      setLevelErrors((prev) => ({ ...prev, [level]: errorMessage }));
+    } finally {
+      setRetryingLevels((prev) => ({ ...prev, [level]: false }));
+    }
+  };
+
   if (error) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -244,6 +306,9 @@ export function ExplanationViewer({
       explanations={explanations}
       cachedStates={cachedStates}
       isLoading={isLoading}
+      onRetryLevel={handleRetryLevel}
+      retryingLevels={retryingLevels}
+      levelErrors={levelErrors}
     />
   );
 }
