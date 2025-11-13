@@ -83,8 +83,11 @@ const markdownComponents: Components = {
   ),
 
   // Code - compact monospace styling
-  code: ({ node, inline, className, children, ...props }) => {
-    if (inline) {
+  code: ({ node, className, children, ...props }) => {
+    // Check if it's inline code by checking if there's a parent pre element
+    const isInline = !className?.includes('language-');
+
+    if (isInline) {
       return (
         <code
           className="px-1 py-0.5 rounded bg-muted/80 text-primary font-mono text-[11px] md:text-xs font-medium"
