@@ -105,7 +105,7 @@
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/yourusername/explain-like-i-m-5.git
+git clone https://github.com/akshadjaiswal/explain-like-i-m-5.git
 cd explain-like-i-m-5/frontend
 npm install
 ```
